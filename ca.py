@@ -39,6 +39,14 @@ class CertificationAuthority:
         )
 
     def sign_certificate(self, public_key, subject_name):
+        for certificate in self.certificates:
+            if certificate.subject.rfc4514_string() == subject_name:
+                return None
+
+        for _,  _, revoked_public_key in self.revoked_certificates:
+            if public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo) == revoked_public_key:
+                return None
+
         builder = (
             x509.CertificateBuilder()
             .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject_name)]))
@@ -52,13 +60,17 @@ class CertificationAuthority:
             private_key=self.private_key, algorithm=hashes.SHA256(), backend=default_backend()
         )
 
-        self.certificates.append(certificate.serial_number)
+        self.certificates.append(certificate)
 
         return certificate, self.root_certificate
 
     def revoke_certificate(self, certificate_serial):
-        self.revoked_certificates.add((certificate_serial, datetime.datetime.utcnow()))
-        self.certificates.remove(certificate_serial)
+        for i, certificate in enumerate(self.certificates):
+            if certificate.serial_number == certificate_serial:
+                self.certificates.pop(i)
+                self.revoked_certificates.add((certificate_serial, datetime.datetime.utcnow(), certificate.public_key().public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo)))
+                break
+
 
     def is_certificate_revoked(self, certificate_serial):
         return certificate_serial in self.revoked_certificates
@@ -70,7 +82,7 @@ class CertificationAuthority:
             .last_update(datetime.datetime.utcnow())
             .next_update(datetime.datetime.utcnow() + datetime.timedelta(days=1))
         )
-        for serial_number, revoke_time in self.revoked_certificates:
+        for serial_number, revoke_time, _ in self.revoked_certificates:
             crl_builder = crl_builder.add_revoked_certificate(
                 x509.RevokedCertificateBuilder()
                 .serial_number(serial_number)
@@ -146,10 +158,12 @@ class User:
 
     def generate_certificate_signing(self):
         csr = self.generate_certificate_signing_request()
-        self.certificate, _ = self.ca.process_certificate_request(csr)
-        if self.certificate:
-            return True
-        return False
+        result_generate = self.ca.process_certificate_request(csr)
+        if not result_generate:
+            return False
+
+        self.certificate, _ = result_generate
+        return True
 
     def verify_certificate(self, certificate):
         try:
@@ -244,6 +258,11 @@ def main_ca():
             print("Alice Certificate has been revoked")
         else:
             print("Alice Certificate has not been revoked")
+
+        if not alice.generate_certificate_signing():
+            print("Succes: fail to regenerate certificate")
+        else:
+            print("Failed: Alice can regenerate revoked certificate")
     else:
         print("Certificates are not valid.")
 
