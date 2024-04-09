@@ -53,7 +53,10 @@ class DispersalAlgorithm:
         M = M.transpose()
         for item_1 in M:
             for item_2 in item_1:
-                message += chr(round(item_2))
+                try:
+                    message += chr(round(item_2))
+                except ValueError:
+                    continue
 
         return bytes(message, 'utf-8')
 
@@ -99,7 +102,9 @@ class Gateway(User):
         if len(return_part_array) < self.dispersal_algorithm.m:
             raise ValueError(f'Recovery failed. Not much number {self.dispersal_algorithm.m} Storage device')
 
-        return self.dispersal_algorithm.recovery(return_part_array, index_return_part_array)
+        source_value = self.dispersal_algorithm.recovery(return_part_array, index_return_part_array)
+
+        return source_value, self.sign_data(source_value)
 
 
 class StorageDevice(User):
@@ -121,7 +126,7 @@ class StorageDevice(User):
                 hash_object.update(str(item_numpy).encode())
             hash_parts.append(hash_object.digest())
 
-        self.part_list = (parts[self.identificator], hash_parts)
+        self.part_list = (parts[self.identificator], hash_parts, signature)
 
     def get_part(self):
         return self.part_list 
@@ -181,15 +186,34 @@ def main():
     print("\nSuccess data stored on storage device")
 
     print("\nGet data from Gateway")
-    recovery_data = gw.get_data_from_part()
+    recovery_data, signature = gw.get_data_from_part()
     print(byte_array, "==", recovery_data, recovery_data==byte_array)
 
-    print("Negative Test:")
+    print("\nUser verify signature:")
+    if alice.verify_data(recovery_data, signature, gw.get_certificate()):
+        print("Success verify signature from gw")
+    else:
+        print("Failed data")
+
+    for i in range(m):
+        sd_list[i].part_list = (numpy.array(numpy.random.randint(0, 50, size=n)), generate_random_ascii(10))
+
+    print("\nGet data from Gateway with 4 invalid storage data")
+    recovery_data, _ = gw.get_data_from_part()
+    print("\nSuccess: ", recovery_data)
+
+    print("\nNegative Test:")
     # gw.storage_devices = gw.storage_devices[:3]
     # recovery_data = gw.get_data_from_part()
 
     # gw.set_data(byte_array, signature, gw.get_certificate())
-    gw.set_data(byte_array, signature, generate_fake_certificate())
+    #gw.set_data(byte_array, signature, generate_fake_certificate())
+
+    print("\nGet data from Gateway with 5 invalid storage data")
+    sd_list[4].part_list = (numpy.array(numpy.random.randint(0, 1, size=n)), generate_random_ascii(10))
+    recovery_data, _ = gw.get_data_from_part()
+    print("Byte array == Recovery Value: ", recovery_data == byte_array)
+    print("Recovery Value:", recovery_data)
 
 if __name__ == '__main__':
     main()
